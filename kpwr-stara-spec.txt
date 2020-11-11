@@ -1,0 +1,29 @@
+def kpwr_multientities_to_relations(sentence_id, rels_xml, tokens, token_ids, multientities, multientity_ids,
+                                    retain_natural_no_rels=True, add_no_relations=False,
+                                    entity_encoding_scheme=None, entity_labels_map,
+                                    positional_tokens=None):
+    """ Input:  the output of tokenize_from_kpwr
+        Output: [tokens], [token_ids], [entities], [entity_ids], [annotated_relations]
+        where [entities] and [entity_ids] are decided as follows:
+
+        if retain_natural_no_rels is False and len(relevant_relations) == 0:
+            return empty set
+        sents = []
+        For each relation in annotated_relations_all:
+           1. Clean up tokens revelant for relations:
+              1.1. Determine if there are any entities that overlap with <e1>..</e1> and <e2>..</e2> (find this by entity_class-index) and put them in {overlap_set}
+                   -> if yes: for i in enumerate(multi_entities_with_sent_index):
+                                  if mewsi[i] contains any element from the overlap_set:
+                                      - remove this element from mewsi[i] and its ID from multi_entity_ids[i]
+           2. Remove overlapping multi-entity markings:
+              2.1. For i in tokens:
+                while len(mewsi[i]) > 1:
+                    - randomly choose one of the entities
+                    - get its entity class with index
+                    - remove the chosen entity both from elements of mewsi and elements of multi_entity_ids
+           3. Insert positional tokens if required
+           4. Append the result to sents
+
+        return sents 
+    """ 
+ 

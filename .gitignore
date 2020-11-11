@@ -1,0 +1,6 @@
+*.p
+*.pkl
+*.h5
+*.bak
+__pycache__/**
+*.pyc

@@ -1,0 +1,40 @@
+{
+    "task": "Semantic relation extraction from KPWr corpus",
+    "comment": "KPWr - semantic relations between named entities delineated using positional indicators",
+    "implements_papers": [], 
+    "input_data": {
+        "reader": "kpwr",
+        "source_files": "/wymiana/Projekty/ML_Data/kpwr-1.1",
+        "ignore_directionality": true,
+        "add_no_relations_clazz": true,
+        "retain_natural_no_rels": true,
+        "restrict_to_subsets": null,
+        "precomputed_labels_path": "/wymiana/Projekty/Studia/MA/program/",
+        "deserialize": true
+    },
+    "engine": "bilstm",
+      "engine_params": {
+          "add_positional_embeddings": true,
+          "layer_defs": {
+              "lstm_layer": { "num_units": 128, "dropout": 0.15, "activation": "relu",
+                              "comment": "is free" },
+              "dense_layer": { "dropout": 0.15 }
+          }
+    },
+    "train_params": {
+        "valid_split": 0.1, "test_split": 0.1,
+        "num_epochs": 12, "batch_size": 32,
+        "early_stopping": "TODO_not_supported_yet"
+    },
+    "tokenizer": {
+        "iface": "bpemb", "lang": "pl", "vs": 10000, "dim": 50,
+        "entity_encoding": "iob",
+        "add_positional_tokens": "scheme_1"
+    },
+    "max_seq_len": 45,
+    "task_specific": {
+        "append_title": true,
+        "maxlen": 45,
+        "with_relations": true
+    }
+}

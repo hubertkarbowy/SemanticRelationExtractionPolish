@@ -1,0 +1,18 @@
+{
+    "engine": "bilstm",
+    "tokenizer": {
+        "iface": "transformers",
+        "lang": "en",
+        "pretrained": "bert-base-uncased"
+    },
+    "max_seq_len": 512,
+
+    "engine_params": {
+        "num_lstm_units": 256
+    },
+
+    "input_data": {
+        "reader": "semeval2018-task7",
+        "source_files": "/wymiana/Projekty/ML_Data/SemEval2018/Task7"
+    }
+}

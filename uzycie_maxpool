@@ -1,0 +1,44 @@
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input 
+from tensorflow.keras.layers import LSTM, Bidirectional
+from tensorflow.keras.layers import Dense 
+from numpy import array
+
+inputs1 = Input(shape=(64,))
+embs = tf.keras.layers.Embedding(input_dim=1000, output_dim=50, input_length=64)(inputs1)
+seq_tensor = LSTM(100, return_sequences=True)(embs)
+maxpooled = tf.reduce_max(seq_tensor, axis=1)
+model = Model(inputs=inputs1, outputs=maxpooled)
+
+
+tf.random.set_seed(42)
+inputs1 = Input(shape=(5,))
+embs = tf.keras.layers.Embedding(input_dim=1000, output_dim=50, input_length=5)(inputs1)
+seq_tensor = LSTM(6, return_sequences=True)(embs)
+maxpooled = tf.reduce_max(seq_tensor, axis=1)
+d = Dense(5)(maxpooled)
+
+model = Model(inputs=inputs1, outputs=d)
+
+
+seq_tensor = model.predict([[1,2,3,4,5], [5,4,3,2,1]])
+seq_tensor
+array([[[-0.00149, -0.00479,  0.01476,  0.00286,  0.00516, -0.00545],
+        [ 0.00115, -0.00325,  0.01237,  0.0021 ,  0.00884, -0.02071],
+        [-0.00728, -0.00278,  0.01557,  0.00618,  0.0101 , -0.02504],
+        [-0.01406,  0.01419, -0.00139, -0.00705, -0.01151, -0.01429],
+        [-0.0062 ,  0.01544, -0.00195,  0.00293, -0.00532, -0.01384]],
+
+       [[ 0.00202,  0.00339, -0.00077,  0.00671,  0.00035, -0.00429],
+        [-0.00677,  0.01805, -0.01394, -0.00574, -0.0205 ,  0.00139],
+        [-0.01071,  0.01385, -0.0048 ,  0.00347, -0.01087, -0.00856],
+        [-0.00275,  0.01154, -0.0029 ,  0.00328, -0.00105, -0.02138],
+        [-0.00186,  0.00553,  0.0129 ,  0.00441,  0.00794, -0.01965]]], dtype=float32)
+
+
+Po max poolingu po osi:
+<tf.Tensor: shape=(2, 6), dtype=float32, numpy=
+array([[ 0.00115,  0.01544,  0.01557,  0.00618,  0.0101 , -0.00545],
+       [ 0.00202,  0.01805,  0.0129 ,  0.00671,  0.00794,  0.00139]], dtype=float32)>
+

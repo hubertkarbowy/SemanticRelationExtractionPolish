@@ -1,0 +1,36 @@
+{
+    "task": "semeval2010_task7",
+    "comment": "Provides both named entities and relations using positional embeddings (for CNN)",
+    "engine": "bilstm",
+    "engine_params": {
+        "layer_defs": [
+            {"layer_type": "lstm", "num_units": 128, "dropout": 0.15, "bidirectional": true, "activation": "relu", "comment": "is free"},
+            {"layer_type": "dense", "num_units": 3, "comment": null, "time_distributed": true}
+        ],
+        "add_positional_embeddings": true
+    },
+    "train_params": {
+        "valid_split": 0.1,
+        "num_epochs": 12,
+        "batch_size": 32,
+        "early_stopping": "TODO_not_supported_yet"
+    },
+    "tokenizer": {
+        "iface": "bpemb",
+        "lang": "en",
+        "vs": 50000,
+        "dim": 100,
+        "entity_encoding": "iob",
+        "add_positional_tokens": "scheme_1"
+    },
+    "max_seq_len": 45,
+    "input_data": {
+        "reader": "semeval2018-task7",
+        "source_files": "/wymiana/Projekty/ML_Data/SemEval2018/Task7"
+    },
+    "task_specific": {
+        "append_title": true,
+        "maxlen": 45,
+        "with_relations": true
+    }
+}

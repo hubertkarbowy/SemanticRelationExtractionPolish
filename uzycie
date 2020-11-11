@@ -1,0 +1,95 @@
+def kpwr_is_running_entity(tag):
+     if tag.name != 'ann': return False
+     if str(tag.attrs.get('chan')).endswith('_nam'):
+         if int(tag.text) > 0:
+             return True
+         else:
+             return False
+     else:
+         return False
+
+########################## WIELE ENCJI (KPWR) ############
+%load_ext autoreload
+%autoreload 2
+import pickle, json
+from readers import WrappedTokenizer, tokenize_from_kpwr
+from bs4 import BeautifulSoup
+cfg = json.load(open('config_kpwr.json', 'r'))
+ees='iob'
+labels_map, rev_labels_map, rels_map, rev_rels_map, _ = pickle.load(open("kpwr_labels_iob.p", "rb"))
+doc_text = open('/wymiana/Projekty/ML_Data/kpwr-1.1/dap/00101820.xml', 'r', encoding='utf-8').readlines()
+doc_text = "\n".join(doc_text)
+rels_text = open('/wymiana/Projekty/ML_Data/kpwr-1.1/dap/00101820.rel.xml', 'r', encoding='utf-8').readlines()
+rels_text = "\n".join(rels_text)
+rels_xml = BeautifulSoup(rels_text, "lxml")
+tokenizer_obj = WrappedTokenizer(tokenizer_config=cfg['tokenizer'])
+
+
+tokens, token_ids, entities, entity_ids, rels = tokenize_from_kpwr(doc_id=None, doc_text=doc_text, tokenizer_obj=tokenizer_obj, entity_encoding_scheme=ees, entity_labels_map=labels_map, relations_map=rels_map, raw_relations=rels_text, positional_tokens="scheme_1")
+
+
+########################## SAME ENCJE ####################
+%load_ext autoreload
+%autoreload 2
+import json
+from EncjoSzukaczLSTM import EncjoSzukaczLSTM
+cfg = json.load(open('config.json', 'r'))
+es = EncjoSzukaczLSTM(config=cfg)
+# model = es._build_model()
+# es.train()
+es.restore("lstm_12epok.h5")
+
+
+########################## ENCJE I RELACJE Z SEMEVALA ####################
+
+%load_ext autoreload
+%autoreload 2
+import json
+from RelacjoSzukaczLSTM import RelacjoSzukaczLSTM
+cfg = json.load(open('config_semeval2018_task7_re_on_marked_nes_noaddrels.json', 'r'))
+es = RelacjoSzukaczLSTM(config=cfg)
+
+
+########################## ENCJE I RELACJE Z KPWR ####################
+
+%load_ext autoreload
+%autoreload 2
+
+import json
+from DataProvider import KPWrProvider
+from RelacjoSzukaczLSTM import RelacjoSzukaczLSTM
+# cfg = json.load(open('config_kpwr_onlyrels.json', 'r'))
+cfg = json.load(open('config_kpwr.json', 'r'))
+rs = RelacjoSzukaczLSTM(config=cfg)
+rs.train()
+
+kpwr = KPWrProvider(config=cfg)
+
+
+
+
+
+from transformers import BertTokenizer, BertModel, BertForMaskedLM
+from readers import wrapped_tokenizer, tokenize_encoded_xml
+
+txt = ' <entity id="H01-1001.1">Oral communication</entity> is ubiquitous and carries important information yet it is also time consuming to document. Given the development of <entity id="H01-1001.2">storage media and networks</entity> one could just record and store a <entity id="H01-1001.3">conversation</entity> for documentation. The question is, however, how an interesting information piece would be found in a <entity id="H01-1001.4">large database</entity> . Traditional <entity id="H01-1001.5">information retrieval techniques</entity> use a <entity id="H01-1001.6">histogram</entity> of <entity id="H01-1001.7">keywords</entity> as the <entity id="H01-1001.8">document representation</entity> but <entity id="H01-1001.9">oral communication</entity> may offer additional <entity id="H01-1001.10">indices</entity> such as the time and place of the rejoinder and the attendance. An alternative <entity id="H01-1001.11">index</entity> could be the activity such as discussing, planning, informing, story-telling, etc. This paper addresses the problem of the <entity id="H01-1001.12">automatic detection</entity> of those activities in meeting situation and everyday rejoinders. Several extensions of this basic idea are being discussed and/or evaluated: Similar to activities one can define subsets of larger <entity id="H01-1001.13">database</entity> and detect those automatically which is shown on a large <entity id="H01-1001.14">database</entity> of <entity id="H01-1001.15">TV shows</entity> . <entity id="H01-1001.16">Emotions</entity> and other <entity id="H01-1001.17">indices</entity> such as the <entity id="H01-1001.18">dominance distribution of speakers</entity> might be available on the <entity id="H01-1001.19">surface</entity> and could be used directly. Despite the small size of the <entity id="H01-1001.20">databases</entity> used some results about the effectiveness of these <entity id="H01-1001.21">indices</entity> can be obtained. '
+
+orig_tok_obj = BertTokenizer.from_pretrained('bert-base-uncased')
+tokenizer_obj = wrapped_tokenizer('transformers', 'english', orig_tok_obj)
+
+# Without sentence-level tokenization:
+
+tokens, entities = tokenize_encoded_xml(doc_text=txt,\
+                   tokenizer_obj=tokenizer_obj,\
+                   sentence_tokenize=False)
+example = list(zip(tokens, entities))
+print(example)
+
+# With sentence-level tokenization:
+
+tokens, entities = tokenize_encoded_xml(doc_text=txt,\
+                   tokenizer_obj=tokenizer_obj,\
+                   sentence_tokenize=True)
+
+example = list(zip(tokens[0], entities[0]))
+print(example)

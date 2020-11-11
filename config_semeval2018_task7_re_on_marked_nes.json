@@ -1,0 +1,36 @@
+{
+    "task": "Semeval 2018 task 7 (relations): with positional indicators",
+    "comment": "Classify relations between named entities delineated using positional indicators",
+    "implements_papers": ["Relation Classification via RNN - Zhang and Wang 2015"], 
+    "input_data": {
+        "reader": "semeval2018_task7",
+        "source_files": "/wymiana/Projekty/ML_Data/SemEval2018/Task7",
+        "ignore_directionality": true,
+        "add_no_relations_clazz": false,
+        "retain_natural_no_rels": true
+    },
+    "engine": "bilstm",
+      "engine_params": {
+          "add_positional_embeddings": true,
+          "layer_defs": {
+              "lstm_layer": { "num_units": 128, "dropout": 0.15, "activation": "relu",
+                              "comment": "is free" },
+              "dense_layer": { "dropout": 0.15 }
+          }
+    },
+    "train_params": {
+        "valid_split": 0.1,  "num_epochs": 12, "batch_size": 32,
+        "early_stopping": "TODO_not_supported_yet"
+    },
+    "tokenizer": {
+        "iface": "bpemb", "lang": "en", "vs": 50000, "dim": 100,
+        "entity_encoding": "iob",
+        "add_positional_tokens": "scheme_1"
+    },
+    "max_seq_len": 45,
+    "task_specific": {
+        "append_title": true,
+        "maxlen": 45,
+        "with_relations": true
+    }
+}
