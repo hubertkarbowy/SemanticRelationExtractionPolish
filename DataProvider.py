@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from readers import WrappedTokenizer, tokenize_encoded_xml, tokenize_from_kpwr, shuf_and_split_list
+from readers import WrappedTokenizer, tokenize_encoded_xml_v2, tokenize_from_kpwr, tokenize_from_kbp37, shuf_and_split_list
 from readers_kpwr import mk_kpwr_labels, restore_kpwr_labels
 from bs4 import BeautifulSoup
 import pickle
 import re
 import os, random, pathlib
 import xml.etree.ElementTree as ET
+from sundry_exceptions import *
 
 class DataProviderInterface(ABC):
     def __init__(self, *, config):
@@ -63,7 +64,9 @@ class SemEval2018Task7Provider(DataProviderInterface):
         self._clazzez = None
 
     def _read_relations_v2(self, fname_rels, ignore_directionality=True):
-        """ Read relations per document, not per class """
+        """ Read relations per document, not per class
+            ret = {'doc1': {('ent_id1', 'ent_id2'): 'PART_WHOLE'}
+        """
         all_clazzez = set()
         all_rels = {}
         with open(fname_rels, 'r', encoding='utf-8') as f:
@@ -117,6 +120,7 @@ class SemEval2018Task7Provider(DataProviderInterface):
 
     def slurp(self):
         tokenizer_obj = WrappedTokenizer(tokenizer_config=self.config['tokenizer'])
+        entity_labels = self.get_entity_labels()
         ############### Trainset #############
         trainset_path = os.path.join(self.config['input_data']['source_files'], '1.1.text.xml')
         rels_path = None
@@ -124,12 +128,15 @@ class SemEval2018Task7Provider(DataProviderInterface):
             rels_path = os.path.join(self.config['input_data']['source_files'], '1.1.relations.txt')
         raw_data, raw_rels = self._read_corpus(trainset_path, rels_path,
                                                ignore_directionality=self.config['task_specific'].get('ignore_directionality'))
-        print(f"There are {len(raw_rels)} relations in the training file")
+        rels_cnt = 0
+        for raw_rel in raw_rels.values(): rels_cnt += len(raw_rel)
+        print(f"There are {rels_cnt} relations defined in {len(raw_rels)} documents of the training file")
         self.trainset = {}
         for doc_id, doc_txt, in raw_data.items():
             all_sent_tokens, all_sent_token_ids, all_sent_entities, all_entity_ids, all_relations_info = \
-                tokenize_encoded_xml(doc_id=doc_id, doc_text=doc_txt, tokenizer_obj=tokenizer_obj, sentence_tokenize=True, \
+                tokenize_encoded_xml_v2(doc_id=doc_id, doc_text=doc_txt, tokenizer_obj=tokenizer_obj, sentence_tokenize=True, \
                                      entity_encoding_scheme=self.config['tokenizer'].get('entity_encoding'), \
+                                     entity_labels_map=entity_labels, \
                                      raw_relations=raw_rels, positional_tokens=self.config['tokenizer'].get('add_positional_tokens'),
                                      add_no_relations=self.config['input_data'].get('add_no_relations_clazz'),
                                      retain_natural_no_rels=self.config['input_data'].get('retain_natural_no_rels')
@@ -151,8 +158,9 @@ class SemEval2018Task7Provider(DataProviderInterface):
         self.testset = {}
         for doc_id, doc_txt, in raw_data.items():
             all_sent_tokens, all_sent_token_ids, all_sent_entities, all_entity_ids, all_relations_info = \
-                    tokenize_encoded_xml(doc_id=doc_id, doc_text=doc_txt, tokenizer_obj=tokenizer_obj, sentence_tokenize=True, \
+                    tokenize_encoded_xml_v2(doc_id=doc_id, doc_text=doc_txt, tokenizer_obj=tokenizer_obj, sentence_tokenize=True, \
                     entity_encoding_scheme=self.config['tokenizer'].get('entity_encoding'), \
+                    entity_labels_map=entity_labels, \
                     raw_relations=raw_rels, positional_tokens=self.config['tokenizer'].get('add_positional_tokens'),
                     add_no_relations=self.config['input_data'].get('add_no_relations_clazz'),
                     retain_natural_no_rels=self.config['input_data'].get('retain_natural_no_rels'))
@@ -171,26 +179,34 @@ class SemEval2018Task7Provider(DataProviderInterface):
             for doc_id in rnd_doc_ids:
                 self.validset[doc_id] = self.trainset[doc_id]
                 del(self.trainset[doc_id])
-            print(f"Validset contains {len(self.validset)} documents")
-        print(f"Trainset contains {len(self.trainset)} documents")
-        print(f"Testset contains {len(self.testset)} documents")
+            print(f"Validset contains {len(self.validset)} sentences")
+        print(f"Trainset contains {len(self.trainset)} sentences")
+        print(f"Testset contains {len(self.testset)} sentences")
 
     def get_entity_labels(self):
-        uniq_labels = set()
-        for dataset in [self.trainset, self.validset, self.testset]:
-            if dataset is None: continue
-            for ent_series in dataset.values():
-                uniq_labels.update(set(ent_series['entities']))
-        uniq_labels_dict = {}
-        idx = 0 
-        if None in uniq_labels:
-            uniq_labels_dict[None] = 0
-            uniq_labels.remove(None)
-            idx = 1
-        for label in sorted(uniq_labels):
-            uniq_labels_dict[label] = idx
-            idx += 1
-        return uniq_labels_dict
+        print(">>>>>> WARNING: For SemEval2018-Task7 reader we have *hardcoded* entity labels <<<<<<<<")
+        if self.config['tokenizer'].get('entity_encoding') is None:
+            return {'O': 0, 'ENT': 1}
+        elif self.config['tokenizer'].get('entity_encoding') == 'iob':
+            return {'O': 0, 'B-ENT': 1, 'I-ENT': 2}
+        else:
+            raise ValueError(f"Unknown entity encoding scheme {entity_encoding}")
+
+        # uniq_labels = set()
+        # for dataset in [self.trainset, self.validset, self.testset]:
+        #     if dataset is None: continue
+        #     for ent_series in dataset.values():
+        #         uniq_labels.update(set(ent_series['entities']))
+        # uniq_labels_dict = {}
+        # idx = 0 
+        # if None in uniq_labels:
+        #     uniq_labels_dict[None] = 0
+        #     uniq_labels.remove(None)
+        #     idx = 1
+        # for label in sorted(uniq_labels):
+        #     uniq_labels_dict[label] = idx
+        #     idx += 1
+        # return uniq_labels_dict
 
     def get_relations_labels(self):
         """ NOTE: a special class "0" = "NO_RELATION" is added if the config says so """
@@ -301,13 +317,83 @@ class KPWrProvider(DataProviderInterface):
                     dest_dataset[f"{doc_id}_fsent{fake_sent_num}"]['entity_ids'] = all_sent_multientity_ids[fake_sent_num]
                     dest_dataset[f"{doc_id}_fsent{fake_sent_num}"]['relations'] = all_sent_relations[fake_sent_num]
 
+class KBP37DataProvider(DataProviderInterface):
+    def __init__(self, *, config):
+        super().__init__(config=config)
+        self.tokenizer = WrappedTokenizer(tokenizer_config=config['tokenizer'])
+
+    def get_entity_labels(self):
+        """ Entity types cannot be assigned reliably, so skipping them """
+        if self.config['tokenizer'].get('entity_encoding') == 'iob':
+            ent_labels = {0: 'O', 1: 'B-ENT', 2: 'I-ENT'}
+        elif self.config['tokenizer'].get('entity_encoding') is None:
+            ent_labels = {0: 'O', 1: 'ENT'}
+        else:
+            raise ValueError(f"Unknown entity encoding scheme {self.config['tokenizer'].get('entity_encoding')}")
+
+    def get_relations_labels(self):
+        """ This is fixed, so no need to scan the corpus """
+        rel_list = ['NO_RELATION', 'per:alternate_names', 'per:origin', 'per:spouse', 'per:title', 'per:employee_of', \
+                    'per:countries_of_residence', 'per:stateorprovinces_of_residence', 'per:cities_of_residence',
+                    'per:country_of_birth', \
+                    'org:alternate_names', 'org:subsidiaries', 'org:top_members/employees', 'org:founded', \
+                    'org:founded_by', 'org:country_of_headquarters', 'org:stateorprovince_of_headquarters', \
+                    'org:city_of_headquarters', 'org:members']
+        rel_map = {}
+        cnt = 0
+        if self.config['input_data'].get('retain_natural_no_rels') is True:
+            rel_map['NO_RELATION'] = 0
+            cnt += 1
+            rel_list = rel_list[1:]
+        else:
+            rel_list = rel_list[1:]
+        for rel in rel_list:
+            rel_map[rel] = cnt
+            if self.config['input_data'].get('ignore_directionality') is True:
+                cnt += 1
+            else:
+                rel_map[rel + "_rev"] = cnt + 1
+                cnt += 2
+        return rel_map
+
+    def slurp(self):
+        self.trainset = {}; self.validset = {}; self.testset = {}
+        for dataset_obj, fname in zip([self.trainset, self.validset, self.testset], ['train.txt', 'dev.txt', 'test.txt']):
+            with open(os.path.join(self.config['input_data']['source_files'], fname), 'r', encoding='utf-8') as f:
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    doc_line = re.search("^([0-9]+)\t(.*)", line.strip())
+                    if doc_line is not None:
+                        doc_id = doc_line.groups()[0]
+                        doc_text = doc_line.groups()[1]
+                        rel_line = f.readline().strip()
+                        try: 
+                            tokens, token_ids, entities, entity_ids, relations = \
+                                tokenize_from_kbp37(doc_id=doc_id, doc_text=doc_text, tokenizer_obj=self.tokenizer, \
+                                                    entity_encoding_scheme=self.config['tokenizer'].get('entity_encoding'), \
+                                                    raw_relations=rel_line, relations_map=self.get_relations_labels(), \
+                                                    positional_tokens=self.config['tokenizer'].get('add_positional_tokens'), \
+                                                    retain_natural_no_rels=self.config['input_data'].get('retain_natural_no_rels'), \
+                                                    ignore_directionality=self.config['input_data'].get('ignore_directionality')
+                                                    )
+                        except MalformedEntityException as e:
+                            print(str(e))
+                        dataset_obj[f"sent{doc_id}"] = {}
+                        dataset_obj[f"sent{doc_id}"]['tokens'] = tokens
+                        dataset_obj[f"sent{doc_id}"]['token_ids'] = token_ids
+                        dataset_obj[f"sent{doc_id}"]['entities'] = entities
+                        dataset_obj[f"sent{doc_id}"]['entity_ids'] = entity_ids
+                        dataset_obj[f"sent{doc_id}"]['relations'] = relations
 
 class DataProviderFactory:
     @staticmethod
     def get_instance(task, config) -> DataProviderInterface:
         providers_map = {
             'semeval2018_task7': SemEval2018Task7Provider,
-            'kpwr': KPWrProvider
+            'kpwr': KPWrProvider,
+            'kbp37': KBP37DataProvider
         }
         ret = providers_map.get(task)
         if ret is None:

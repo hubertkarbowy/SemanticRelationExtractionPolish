@@ -1,22 +1,20 @@
 {
-    "task": "Semantic relation extraction from KPWr corpus",
-    "comment": "KPWr - semantic relations between named entities delineated using positional indicators",
+    "task": "Semantic relation extraction from KBP37 corpus",
+    "comment": "",
     "implements_papers": [], 
     "input_data": {
-        "reader": "kpwr",
-        "source_files": "/wymiana/Projekty/ML_Data/kpwr-1.1",
+        "reader": "kbp37",
+        "source_files": "/wymiana/Projekty/ML_Data/kbp37",
         "ignore_directionality": true,
-        "add_no_relations_clazz": true,
         "retain_natural_no_rels": true,
         "restrict_to_subsets": null,
-        "precomputed_labels_path": "/wymiana/Projekty/Studia/MA/program/",
-        "deserialize": true
+        "deserialize": false
     },
     "engine": "bilstm",
       "engine_params": {
           "add_positional_embeddings": true,
           "layer_defs": {
-              "lstm_layer": { "num_units": 128, "dropout": 0.15, "activation": "relu",
+              "lstm_layer": { "num_units": 400, "dropout": 0.15, "activation": "relu",
                               "comment": "is free" },
               "dense_layer": { "dropout": 0.15 }
           }
@@ -27,14 +25,13 @@
         "early_stopping": "TODO_not_supported_yet"
     },
     "tokenizer": {
-        "iface": "bpemb", "lang": "pl", "vs": 10000, "dim": 50,
+        "iface": "bpemb", "lang": "en", "vs": 10000, "dim": 50,
         "entity_encoding": "iob",
         "add_positional_tokens": "scheme_1"
     },
-    "max_seq_len": 45,
+    "max_seq_len": 80,
     "task_specific": {
-        "append_title": true,
-        "maxlen": 45,
+        "maxlen": 80,
         "with_relations": true
     }
 }

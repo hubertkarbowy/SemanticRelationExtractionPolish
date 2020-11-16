@@ -38,7 +38,9 @@ class EncjoSzukaczLSTM(EncjoSzukacz):
         all_token_ids = [ts['token_ids'] for ts in dataset.values()]
         # all_entities = [[self.labels_map[j] for j in ts['entities']] for ts in dataset.values()]
         padded_tokens = pad_seq(all_token_ids, maxlen=self.config['max_seq_len'], \
-                                padding='pre', truncating='post', value=0)
+                                padding=self.config['tokenizer'].get('padding') or 'pre',
+                                truncating=self.config['tokenizer'].get('truncating') or 'post',
+                                value=self.config['tokenizer'].get('pad_value') or 0)
         #padded_entities = pad_seq(all_entities, maxlen=self.config['max_seq_len'],
         #                        padding='pre', truncating='post', value=0)
         # Tensorflow versions earlier than 1.14 (or 2.0?) have issues with sparse_categorical_crossentropy

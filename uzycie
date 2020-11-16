@@ -56,17 +56,33 @@ es = RelacjoSzukaczLSTM(config=cfg)
 %autoreload 2
 
 import json
-from DataProvider import KPWrProvider
 from RelacjoSzukaczLSTM import RelacjoSzukaczLSTM
-# cfg = json.load(open('config_kpwr_onlyrels.json', 'r'))
-cfg = json.load(open('config_kpwr.json', 'r'))
+
+cfg = json.load(open('config_kbp37.json', 'r'))
 rs = RelacjoSzukaczLSTM(config=cfg)
 rs.train()
 
 kpwr = KPWrProvider(config=cfg)
 
 
+###################### POZYCYJNE TOKENY V2 BERT Z PRZEROBIONYM SEMEVALEM 2018 ###############
+%load_ext autoreload
+%autoreload 2
+import json
+from DataProvider import SemEval2018Task7Provider
+from RelacjoSzukaczBERT import RelacjoSzukaczBERT
+from readers import WrappedTokenizer, tokenize_encoded_xml_v2
 
+cfg = json.load(open('config_bert.json', 'r'))
+# dprov = SemEval2018Task7Provider(config=cfg)
+# wtok = WrappedTokenizer(tokenizer_config=cfg['tokenizer'])
+# entity_labels_map={'O':0, 'B-ENT': 1, 'I-ENT': 2}
+# docs, rels = dprov._read_corpus('/wymiana/Projekty/ML_Data/SemEval2018/Task7/1.1.text.xml', \
+                                '/wymiana/Projekty/ML_Data/SemEval2018/Task7/1.1.relations.txt')
+# tokenize_encoded_xml_v2(doc_id='L08-1097', doc_text=docs['L08-1097'], tokenizer_obj=wtok, entity_labels_map=entity_labels_map, \
+#                         entity_encoding_scheme='iob', raw_relations=rels, positional_tokens='scheme_2')
+
+rs = RelacjoSzukaczBERT(config=cfg)
 
 
 from transformers import BertTokenizer, BertModel, BertForMaskedLM

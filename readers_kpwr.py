@@ -127,12 +127,19 @@ def kpwr_xml2dataprovider_entity_label(*, xml_relation_fromto_node, entity_encod
     return ret_labels
 
 def print_kpwr_tuples(i, tokens, token_ids, multientities, multientity_ids, rels=None):
-    print("{: >15} {: >10} {: >40} {: >20}".format("subword", "subword_id", "multients", "multient_ids"))
+    print("{: >4} {: >15} {: >10} {: >40} {: >20}".format("idx", "subword", "subword_id", "multients", "multient_ids"))
     for j in range(len(tokens[i])): 
-        print("{: >15} {: >10} {: >40} {: >20}".format(tokens[i][j], token_ids[i][j], str(multientities[i][j]),
+        print("{: >4} {: >15} {: >10} {: >40} {: >20}".format(j, tokens[i][j], token_ids[i][j], str(multientities[i][j]),
                                                        str(multientity_ids[i][j])))
     if rels is not None:
         print(f"Relations: {rels[i]}")
+
+def generic_entity_id_from_label(raw_label, labels_map, entity_encoding_scheme=None):
+    """
+    "O" => 0                                              # all schemes
+    "B-firstname_nam-1" => labels_map['B-firstname_nam-1']   # ees = 'iob'/'bilou'
+    """
+    return labels_map[raw_label]
 
 def get_kpwr_entity_id_from_indexed_label(indexed_label, kpwr_labels_map, entity_encoding_scheme=None):
     """
@@ -405,14 +412,20 @@ def calculate_positional_token_offsets(*, entity_labels, from_label_pure, to_lab
     return insertable_positions
 
 def insert_positional_tokens(*, tokens, token_ids, entities, entity_ids, positions, entity_encoding_scheme, \
-                             labels_map, positional_tokens, special_token_ids):
+                             labels_map, positional_tokens, special_token_ids, corpus='kpwr'):
     if entity_encoding_scheme not in [None, "iob"]:
         raise ValueError(f"Unknown entity encoding scheme {entity_encoding_scheme}")
     if positional_tokens == 'scheme_1':
         e1_beg = "<e1>"; e1_end = "</e1>"; e2_beg = "<e2>"; e2_end = "</e2>"
+    elif positional_tokens == 'scheme_2':
+        e1_beg = "$"; e1_end = "$"; e2_beg = "#"; e2_end = "#"
     else:
         raise ValueError(f"Unknown positional tokens scheme {positional_tokens}")
 
+    if corpus == 'kpwr':
+        entity_id_getter_fn = get_kpwr_entity_id_from_indexed_label
+    else:
+        entity_id_getter_fn = generic_entity_id_from_label
     ############## </e2> ############
     tokens.insert(positions['e2_end'] + 1, e2_end)
     token_ids.insert(positions['e2_end'] + 1, special_token_ids[e2_end])
@@ -422,7 +435,7 @@ def insert_positional_tokens(*, tokens, token_ids, entities, entity_ids, positio
     elif entity_encoding_scheme == 'iob':
         expected_end_label = re.sub("^B-", "I-", entities[positions['e2_end']]) # B-city_nam-1 => I-city_nam-1 if singleton
         entities[positions['e2_end']] = expected_end_label
-        entity_ids[positions['e2_end']] = get_kpwr_entity_id_from_indexed_label(expected_end_label, labels_map, entity_encoding_scheme)
+        entity_ids[positions['e2_end']] = entity_id_getter_fn(expected_end_label, labels_map, entity_encoding_scheme)
         entities.insert(positions['e2_end'] + 1, entities[positions['e2_end']])
         entity_ids.insert(positions['e2_end'] + 1, entity_ids[positions['e2_end']])
     else:
@@ -438,9 +451,9 @@ def insert_positional_tokens(*, tokens, token_ids, entities, entity_ids, positio
         i_beg_label = re.sub("^B-", "I-", entities[positions['e2_beg']]) # B-city_nam-1 => I-city_nam-1 before <e1>
         b_beg_label = re.sub("^I-", "B-", i_beg_label) # I-city_nam-1 => B-city_nam-1 for <e1>
         entities[positions['e2_beg']] = i_beg_label
-        entity_ids[positions['e2_beg']] = get_kpwr_entity_id_from_indexed_label(i_beg_label, labels_map, entity_encoding_scheme)
+        entity_ids[positions['e2_beg']] = entity_id_getter_fn(i_beg_label, labels_map, entity_encoding_scheme)
         entities.insert(positions['e2_beg'], b_beg_label)
-        entity_ids.insert(positions['e2_beg'], get_kpwr_entity_id_from_indexed_label(b_beg_label, labels_map, entity_encoding_scheme))
+        entity_ids.insert(positions['e2_beg'], entity_id_getter_fn(b_beg_label, labels_map, entity_encoding_scheme))
     else:
         raise ValueError(f"Unknown ees {entitity_encoding_scheme}")
 
@@ -453,7 +466,7 @@ def insert_positional_tokens(*, tokens, token_ids, entities, entity_ids, positio
     elif entity_encoding_scheme == 'iob':
         expected_end_label = re.sub("^B-", "I-", entities[positions['e1_end']]) # B-city_nam-1 => I-city_nam-1 if singleton
         entities[positions['e1_end']] = expected_end_label
-        entity_ids[positions['e1_end']] = get_kpwr_entity_id_from_indexed_label(expected_end_label, labels_map, entity_encoding_scheme)
+        entity_ids[positions['e1_end']] = entity_id_getter_fn(expected_end_label, labels_map, entity_encoding_scheme)
         entities.insert(positions['e1_end'] + 1, entities[positions['e1_end']])
         entity_ids.insert(positions['e1_end'] + 1, entity_ids[positions['e1_end']])
     else:
@@ -469,13 +482,17 @@ def insert_positional_tokens(*, tokens, token_ids, entities, entity_ids, positio
         i_beg_label = re.sub("^B-", "I-", entities[positions['e1_beg']]) # B-city_nam-1 => I-city_nam-1 before <e1>
         b_beg_label = re.sub("^I-", "B-", i_beg_label) # I-city_nam-1 => B-city_nam-1 for <e1>
         entities[positions['e1_beg']] = i_beg_label
-        entity_ids[positions['e1_beg']] = get_kpwr_entity_id_from_indexed_label(i_beg_label, labels_map, entity_encoding_scheme)
+        entity_ids[positions['e1_beg']] = entity_id_getter_fn(i_beg_label, labels_map, entity_encoding_scheme)
         entities.insert(positions['e1_beg'], b_beg_label)
-        entity_ids.insert(positions['e1_beg'], get_kpwr_entity_id_from_indexed_label(b_beg_label, labels_map, entity_encoding_scheme))
+        entity_ids.insert(positions['e1_beg'], entity_id_getter_fn(b_beg_label, labels_map, entity_encoding_scheme))
     else:
         raise ValueError(f"Unknown ees {entitity_encoding_scheme}")
-    inserted_locations = {"e1_beg": tokens.index(e1_beg), \
-                          "e1_end": tokens.index(e1_end), \
-                          "e2_beg": tokens.index(e2_beg), \
-                          "e2_end": tokens.index(e2_end)}
+    #inserted_locations = {"e1_beg": tokens.index(e1_beg), \
+    #                      "e1_end": tokens.index(e1_end), \
+    #                      "e2_beg": tokens.index(e2_beg), \
+    #                      "e2_end": tokens.index(e2_end)}
+    inserted_locations = {"e1_beg": positions['e1_beg'], \
+                          "e1_end": positions['e1_end'] + 2, \
+                          "e2_beg": positions['e2_beg'] + 2, \
+                          "e2_end": positions['e2_end'] + 4}
     return tokens, token_ids, entities, entity_ids, inserted_locations

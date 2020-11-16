@@ -1,18 +1,42 @@
 {
-    "engine": "bilstm",
-    "tokenizer": {
-        "iface": "transformers",
-        "lang": "en",
-        "pretrained": "bert-base-uncased"
-    },
-    "max_seq_len": 512,
-
-    "engine_params": {
-        "num_lstm_units": 256
-    },
-
+    "task": "Semantic relation extraction from SemEval2018 and 10 corpus with BERT",
+    "comment": "",
+    "implements_papers": ["Enriching..."], 
     "input_data": {
-        "reader": "semeval2018-task7",
-        "source_files": "/wymiana/Projekty/ML_Data/SemEval2018/Task7"
+        "reader": "semeval2018_task7",
+        "source_files": "/wymiana/Projekty/ML_Data/SemEval2018/Task7",
+        "ignore_directionality": false,
+        "retain_natural_no_rels": true,
+        "add_no_relations_clazz": false,
+        "restrict_to_subsets": null,
+        "deserialize": false
+    },
+    "engine": "transformers",
+    "engine_params": {
+          "add_positional_embeddings": false,
+          "layer_defs": {
+              "ents_dense_layer": { "num_units": 384, "dropout": 0.15, "activation": "relu",
+                                    "comment": "is free" },
+              "final_dense_layer": { "num_units": null, "dropout": 0.15,
+                                    "activation": "softmax"}
+          }
+    },
+    "tokenizer": {
+        "iface": "transformers", "lang": "en",
+        "pretrained": "bert-base-uncased",
+        "entity_encoding": "iob",
+        "add_positional_tokens": "scheme_2",
+        "padding": "post",
+        "truncating": "post"
+    },
+    "max_seq_len": 80,
+    "engine_params": {
+        "append_title": true,
+        "maxlen": 80,
+        "with_relations": true
+    },
+    "task_specific": {
+        "with_relations": true,
+        "finetune_pretrained": true
     }
 }
