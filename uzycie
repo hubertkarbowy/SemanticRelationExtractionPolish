@@ -78,11 +78,26 @@ cfg = json.load(open('config_bert.json', 'r'))
 # wtok = WrappedTokenizer(tokenizer_config=cfg['tokenizer'])
 # entity_labels_map={'O':0, 'B-ENT': 1, 'I-ENT': 2}
 # docs, rels = dprov._read_corpus('/wymiana/Projekty/ML_Data/SemEval2018/Task7/1.1.text.xml', \
-                                '/wymiana/Projekty/ML_Data/SemEval2018/Task7/1.1.relations.txt')
+#                                '/wymiana/Projekty/ML_Data/SemEval2018/Task7/1.1.relations.txt')
 # tokenize_encoded_xml_v2(doc_id='L08-1097', doc_text=docs['L08-1097'], tokenizer_obj=wtok, entity_labels_map=entity_labels_map, \
 #                         entity_encoding_scheme='iob', raw_relations=rels, positional_tokens='scheme_2')
 
 rs = RelacjoSzukaczBERT(config=cfg)
+trainset = rs._mangle_inputs('trainset')
+
+######################
+from transformers import AutoTokenizer, TFAutoModel
+import tensorflow as tf
+from tensorflow.keras.layers import Input
+
+bert_layer = TFAutoModel.from_pretrained('bert-base-uncased')
+input_ids_layer = Input(shape=(80,), name='input_ids', dtype=tf.int32)
+input_toktypeids_layer = Input(shape=(80,), name='token_type_ids', dtype=tf.int32)
+input_attnmask_layer = Input(shape=(80,), name='attention_mask', dtype=tf.int32)
+
+bert_out_hidden = bert_layer({'input_ids': input_ids_layer, 'token_type_ids': input_toktypeids_layer, 'attention_mask': input_attnmask_layer})[0]
+model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer], outputs=bert_out_hidden)
+
 
 
 from transformers import BertTokenizer, BertModel, BertForMaskedLM

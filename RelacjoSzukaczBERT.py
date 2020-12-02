@@ -5,6 +5,7 @@ import colors
 import re
 from transformers import AutoTokenizer, TFAutoModel
 from tensorflow.keras.preprocessing.sequence import pad_sequences as pad_seq
+from tensorflow.keras.layers import Input
 from EncjoSzukaczLSTM import EncjoSzukaczLSTM
 from DataProvider import DataProviderFactory
 from readers import tokenize_encoded_xml_v2
@@ -65,34 +66,55 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
             if dataset[sent_key]['token_ids'][-1] != 0: # SEP falls outside the max_len boundary, so it has to be reinstated on the final position
                 dataset[sent_key]['token_ids'][-1] = self.data_provider.tokenizer.special_token_ids['[SEP]']
         for sent_key in too_long_sents: del(dataset[sent_key])
+        relation_infos = [dataset[sent_key]['relations'] for sent_key in dataset.keys()]
         padded_tokens = self._mangle_token_ids(dataset)
         token_types = tf.zeros(padded_tokens.shape, dtype=tf.int32)
         attn_mask = tf.map_fn(fn=lambda row: tf.map_fn(fn=lambda tok_id: 0 if tok_id == 0 else 1, elems=row), elems=padded_tokens, dtype=tf.int32)
         relation_classes = self._mangle_rels(dataset)
-        return [padded_tokens, token_types, attn_mask], relation_classes
+        relation_classes_tensor = tf.constant([[d.get('e1_beg') or -1, d.get('e1_end') or -1, d.get('e2_beg') or -1, d.get('e2_end') or -1] for d in relation_infos])
+        relation_classes_mask = tf.map_fn(fn=lambda row: tf.zeros((4, 768), dtype=tf.int32) if all([pos==-1 for pos in row]) else tf.ones((4, 768), dtype=tf.int32), elems=relation_classes_tensor)
+        relation_classes_tensor = tf.map_fn(fn=lambda row: tf.zeros(4, dtype=tf.int32) if all([pos==-1 for pos in row]) else row, elems=relation_classes_tensor) 
+        return {
+                'input_ids': padded_tokens,
+                'token_type_ids': token_types,
+                'attention_mask': attn_mask,
+                'marker_positions': relation_classes_tensor,
+                'marker_positions_mask': relation_classes_mask
+                }, relation_classes, relation_infos
 
     def _build_model(self):
-        inp_layer = None
+        # moze sprobowac staly rozmiar batcha i tyle...
+        input_ids_layer = Input(shape=(self.config['max_seq_len'],), name='input_ids', dtype=tf.int32)
+        input_toktypeids_layer = Input(shape=(self.config['max_seq_len'],), name='token_type_ids', dtype=tf.int32)
+        input_attnmask_layer = Input(shape=(self.config['max_seq_len'],), name='attention_mask', dtype=tf.int32)
+        input_entity_marker_positions = Input(shape=(4,), dtype=tf.int32, name='entity_markers')
+        input_entity_marker_mask = Input(shape=(4, 768,), dtype=tf.int32, name='entity_markers_mask')
+
         bert_layer = TFAutoModel.from_pretrained(self.config['tokenizer']['pretrained'])
+        bert_out_hidden = bert_layer({'input_ids': input_ids_layer, 'token_type_ids': input_toktypeids_layer,
+                                      'attention_mask': input_attnmask_layer})[0] # only the hidden states
+        
+        tylko_cztery = tf.gather(bert_out_hidden, input_entity_marker_positions, axis=1, batch_dims=1, name="all_ent_vecs")
+        maska_na_cztery = tf.math.multiply(tylko_cztery, tf.cast(input_entity_marker_mask, tf.float32), name="masked_all_ent_vecs")
+        
+        H_ij_avg = tf.reduce_mean(maska_na_cztery[:, 0:2, :], axis=1, name="H_ij_avg")
+        H_km_avg = tf.reduce_mean(maska_na_cztery[:, 2:4, :], axis=1, name="H_km_avg")
+        dense_shared = tf.keras.layers.Dense(768, activation='relu')
+        H_ij_dense = dense_shared(H_ij_avg)
+        H_ij_dense_dropout = tf.keras.layers.Dropout(0.1)(H_ij_dense)
+        H_km_dense = dense_shared(H_km_avg)
+        H_km_dense_dropout = tf.keras.layers.Dropout(0.1)(H_km_dense)
 
+        cls = bert_out_hidden[:, 0, :]
+        # polaczone = tf.concat([cls, H_ij_avg, H_km_avg], axis=1, name="concatenated")
+        polaczone = tf.concat([cls, H_ij_dense_dropout, H_km_dense_dropout], axis=1, name="concatenated")
+        przedostatnia = tf.keras.layers.Dense(3*len(self.labels_map), activation='relu')(polaczone)
+        ostatnia = tf.keras.layers.Dense(len(self.labels_map), activation='softmax')(przedostatnia)
+        
+        # model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer], outputs=bert_out_hidden)
+        model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer, input_entity_marker_positions, input_entity_marker_mask],
+                               outputs=[ostatnia])
 
-        int_inputs = tf.keras.layers.Input(shape=(self.config['task_specific']['maxlen'],))
-        embs = tf.keras.layers.Embedding(input_dim=self.vocab_size, output_dim=self.emb_dim,
-                                         input_length=self.config['task_specific']['maxlen'],
-                                         embeddings_initializer=tf.keras.initializers.Constant(self.emb_matrix),
-                                         mask_zero=True,
-                                         trainable=True)(int_inputs)
-        lstm_conf = self.config['engine_params']['layer_defs']['lstm_layer']
-        sequ = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(lstm_conf['num_units'],
-                                             dropout=lstm_conf.get('dropout') or 0.0,
-                                             activation = lstm_conf.get('activation') or 'tanh',
-                                             return_sequences=True))(embs)
-        max_each_dim_op = tf.reduce_max(sequ, axis=1, name="choose_max_dim")
-        dense_conf = self.config['engine_params']['layer_defs']['dense_layer']
-        dropouted = tf.keras.layers.Dropout(dense_conf.get('dropout') or 0.0)(max_each_dim_op)
-        final_dense = tf.keras.layers.Dense(len(self.data_provider.get_relations_labels()),
-                                            activation='softmax')(dropouted)
-        model = tf.keras.Model(inputs=int_inputs, outputs=final_dense)
         model.summary()
         return model
 
