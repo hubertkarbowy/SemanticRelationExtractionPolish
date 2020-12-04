@@ -24,6 +24,7 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         else:
             self.data_provider.slurp()
         self.model = None
+        self.mangled_pickles = None
 
     def _print_from_dataset(self, dataset, i):
         pieces = self.data_provider.tokenizer.convert_ids_to_tokens(dataset['input_ids'][i])
@@ -56,6 +57,9 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         return labels_categorical
 
     def _mangle_inputs(self, which, as_generator=False):
+        if self.mangled_pickles is not None:
+            p = pickle.load(open(os.path.join(self.mangled_pickles, f"{which}_RBert.p"), 'rb'))
+            return p
         dataset = copy.deepcopy(self.data_provider.get_dataset(which))
         too_long_sents = set()
         for sent_key in dataset.keys():
