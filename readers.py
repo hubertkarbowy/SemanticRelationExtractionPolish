@@ -123,7 +123,7 @@ class WrappedTokenizer:
         if self.iface == 'nltk':
             return token_ids
         elif self.iface == 'transformers':
-            raise NotImplementedError("Jeszcze nie")
+            return self.tokenizer_obj.convert_ids_to_tokens(token_ids)
         elif self.iface == 'bpemb':
             return [self.tokenizer_obj.words[token_id] for token_id in token_ids]
         else:
@@ -698,7 +698,7 @@ def tokenize_from_kbp37(*, doc_id, doc_text, tokenizer_obj, lang='english',
     if positional_tokens == 'scheme_1':
         if not all([tokenizer_obj.special_token_ids[t] for t in ['<e1>', '</e1>', '<e2>', '</e2>']]):
             raise ValueError("The selected tokenizer doesn't contain positional tokens in its vocabulary.")
-    elif positional_tokens is None:
+    elif positional_tokens in ['scheme_2', None]:
         pass
     else:
         raise ValueError(f"Unknown positional tokens scheme {positional_tokens}")

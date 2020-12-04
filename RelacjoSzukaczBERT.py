@@ -3,6 +3,7 @@ import tensorflow as tf
 import copy, pickle
 import colors
 import re
+import os
 from transformers import AutoTokenizer, TFAutoModel
 from tensorflow.keras.preprocessing.sequence import pad_sequences as pad_seq
 from tensorflow.keras.layers import Input
@@ -22,6 +23,22 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
             self.data_provider.deserialize()
         else:
             self.data_provider.slurp()
+        self.model = None
+
+    def _print_from_dataset(self, dataset, i):
+        pieces = self.data_provider.tokenizer.convert_ids_to_tokens(dataset['input_ids'][i])
+        print(pieces)
+        print("{: >4} {: >20} {: >15} {: >4} {: >4}".format("idx", "subword", "subword_id", "attn_mask", "marker_mask"))
+        allzeros = tf.zeros((768,), dtype=tf.int32)
+        allones = tf.ones((768,), dtype=tf.int32)
+        for j in range(len(pieces)): 
+            print("{: >4} {: >20} {: >15} {: >4}".format(j, pieces[j], dataset['input_ids'][i][j],
+                                                               dataset['attention_mask'][i][j]))
+        print(f"Marker positions (orig): {dataset['marker_positions'][i]}")
+        print(f"Marker positions masks: ")
+        for k in range(4):
+            print(f"all_zeros_{k} = {all(dataset['marker_positions_mask'][i][k] == allzeros)}, " \
+                  f"all_ones_{k} = {all(dataset['marker_positions_mask'][i][k] == allones)}, ")
 
     def _mangle_rels(self, dataset, as_generator=False):
         self.labels_map = self.data_provider.get_relations_labels()
@@ -57,10 +74,10 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
                 dataset[sent_key]['relations']['e1_end'] += 1
                 dataset[sent_key]['relations']['e2_beg'] += 1
                 dataset[sent_key]['relations']['e2_end'] += 1
-                if any([marker_pos > self.config['max_seq_len'] for marker_pos in [dataset[sent_key]['relations']['e1_beg'],
-                                                                                   dataset[sent_key]['relations']['e1_end'],
-                                                                                   dataset[sent_key]['relations']['e2_beg'],
-                                                                                   dataset[sent_key]['relations']['e2_end']]]):
+                if any([marker_pos > self.config['max_seq_len'] - 1 for marker_pos in [dataset[sent_key]['relations']['e1_beg'],
+                                                                                       dataset[sent_key]['relations']['e1_end'],
+                                                                                       dataset[sent_key]['relations']['e2_beg'],
+                                                                                       dataset[sent_key]['relations']['e2_end']]]):
                     print(f"Warning! Sentence {sent_key} contains entities that fall outside the padding boundary and will be removed.")
                     too_long_sents.add(sent_key)
             if dataset[sent_key]['token_ids'][-1] != 0: # SEP falls outside the max_len boundary, so it has to be reinstated on the final position
@@ -82,6 +99,10 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
                 'marker_positions_mask': relation_classes_mask
                 }, relation_classes, relation_infos
 
+        #model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer,
+        # input_attnmask_layer, input_entity_marker_positions,
+        # input_entity_marker_mask],
+
     def _build_model(self):
         # moze sprobowac staly rozmiar batcha i tyle...
         input_ids_layer = Input(shape=(self.config['max_seq_len'],), name='input_ids', dtype=tf.int32)
@@ -91,6 +112,7 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         input_entity_marker_mask = Input(shape=(4, 768,), dtype=tf.int32, name='entity_markers_mask')
 
         bert_layer = TFAutoModel.from_pretrained(self.config['tokenizer']['pretrained'])
+        bert_layer.trainable = self.config['task_specific'].get('finetune_pretrained')
         bert_out_hidden = bert_layer({'input_ids': input_ids_layer, 'token_type_ids': input_toktypeids_layer,
                                       'attention_mask': input_attnmask_layer})[0] # only the hidden states
         
@@ -108,8 +130,8 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         cls = bert_out_hidden[:, 0, :]
         # polaczone = tf.concat([cls, H_ij_avg, H_km_avg], axis=1, name="concatenated")
         polaczone = tf.concat([cls, H_ij_dense_dropout, H_km_dense_dropout], axis=1, name="concatenated")
-        przedostatnia = tf.keras.layers.Dense(3*len(self.labels_map), activation='relu')(polaczone)
-        ostatnia = tf.keras.layers.Dense(len(self.labels_map), activation='softmax')(przedostatnia)
+        przedostatnia = tf.keras.layers.Dense(3*len(self.data_provider.get_relations_labels()), activation='relu')(polaczone)
+        ostatnia = tf.keras.layers.Dense(len(self.data_provider.get_relations_labels()), activation='softmax')(przedostatnia)
         
         # model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer], outputs=bert_out_hidden)
         model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer, input_entity_marker_positions, input_entity_marker_mask],
@@ -119,14 +141,28 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         return model
 
     def train(self):
+        x_train, y_train, _ = self._mangle_inputs('trainset')
+        x_valid, y_valid, _ = self._mangle_inputs('validset')
+        x_train_bundle = [x_train['input_ids'], x_train['token_type_ids'],
+                          x_train['attention_mask'], x_train['marker_positions'],
+                          x_train['marker_positions_mask']]
+        x_valid_bundle = [x_valid['input_ids'], x_valid['token_type_ids'],
+                          x_valid['attention_mask'], x_valid['marker_positions'],
+                          x_valid['marker_positions_mask']]
         self.model = self.model or self._build_model()
         opt = tf.keras.optimizers.Adam(learning_rate=0.0005)
         self.model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
-        x_train, y_train = self._mangle_inputs('trainset')
-        x_valid, y_valid = self._mangle_inputs('validset')
-        self.model.fit(x_train, y_train, epochs=self.config['train_params'].get('num_epochs') or 1,
+        self.model.fit(x_train_bundle, y_train, epochs=self.config['train_params'].get('num_epochs') or 1,
                   batch_size=self.config['train_params'].get('batch_size'),
-                  validation_data=(x_valid, y_valid))
+                  validation_data=(x_valid_bundle, y_valid))
+
+    def prepare_pred_input(self, mangled_dataset, from_idx, to_idx):
+        x_pred_bundle = [mangled_dataset['input_ids'][from_idx:to_idx], mangled_dataset['token_type_ids'][from_idx:to_idx],
+                         mangled_dataset['attention_mask'][from_idx:to_idx], mangled_dataset['marker_positions'][from_idx:to_idx],
+                         mangled_dataset['marker_positions_mask'][from_idx:to_idx]]
+        ret = self.model.predict(x_pred_bundle)
+        return ret
+
 
     def evaluate(self, which=None):
         which=which or 'validset'
@@ -198,12 +234,13 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
 
     def save(self, path):
         self.model.save(path, overwrite=True)
-        pickle.dump({'labels': self.labels_map, 'rev_labels': self.rev_labels_map}, open('lstm_labels.p', 'wb')) # FIXME: path
+        pickle.dump({'labels': self.labels_map, 'rev_labels': self.rev_labels_map},
+                open(os.path.join(path, 'bert_labels.p'), 'wb'))
         print(f"Saved to {path}")
 
     def restore(self, path):
         self.model = tf.keras.models.load_model(path)
-        rest_labels = pickle.load(open('lstm_labels.p', 'rb')) # FIXME: path
+        rest_labels = pickle.load(open(os.path.join(path, 'bert_labels.p'), 'rb'))
         self.labels_map = rest_labels['labels']
         self.rev_labels_map = rest_labels['rev_labels']
         print(f"Restored from {path}")
