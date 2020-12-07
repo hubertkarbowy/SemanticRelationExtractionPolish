@@ -4,7 +4,7 @@ import copy, pickle
 import colors
 import re
 import os
-from transformers import AutoTokenizer, TFAutoModel
+from transformers import AutoTokenizer, TFAutoModel, AutoConfig
 from tensorflow.keras.preprocessing.sequence import pad_sequences as pad_seq
 from tensorflow.keras.layers import Input
 from EncjoSzukaczLSTM import EncjoSzukaczLSTM
@@ -26,20 +26,15 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         self.model = None
         self.mangled_pickles = None
 
-    def _print_from_dataset(self, dataset, i):
+    def _print_from_dataset(self, dataset, relation_infos, i):
         pieces = self.data_provider.tokenizer.convert_ids_to_tokens(dataset['input_ids'][i])
         print(pieces)
-        print("{: >4} {: >20} {: >15} {: >4} {: >4}".format("idx", "subword", "subword_id", "attn_mask", "marker_mask"))
-        allzeros = tf.zeros((768,), dtype=tf.int32)
-        allones = tf.ones((768,), dtype=tf.int32)
+        print("{: >4} {: >20} {: >15} {: >8} {: >8} {: >8}".format("idx", "subword", "subword_id", "attn_mask", "e1_mask", "e2_mask"))
         for j in range(len(pieces)): 
-            print("{: >4} {: >20} {: >15} {: >4}".format(j, pieces[j], dataset['input_ids'][i][j],
-                                                               dataset['attention_mask'][i][j]))
-        print(f"Marker positions (orig): {dataset['marker_positions'][i]}")
-        print(f"Marker positions masks: ")
-        for k in range(4):
-            print(f"all_zeros_{k} = {all(dataset['marker_positions_mask'][i][k] == allzeros)}, " \
-                  f"all_ones_{k} = {all(dataset['marker_positions_mask'][i][k] == allones)}, ")
+            print("{: >4} {: >20} {: >15} {: >8} {: >8} {: >8}".format(j, pieces[j], dataset['input_ids'][i][j],
+                                                                dataset['attention_mask'][i][j], dataset['e1_mask'][i][j][0],
+                                                                dataset['e2_mask'][i][j][0]))
+        print(f"Relation infos (orig): {relation_infos[i]}")
 
     def _mangle_rels(self, dataset, as_generator=False):
         self.labels_map = self.data_provider.get_relations_labels()
@@ -56,12 +51,25 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         labels_categorical = tf.keras.utils.to_categorical(all_rel_labels, num_classes=len(self.labels_map))
         return labels_categorical
 
+    def _get_entity_mask(self, record, which_entity, override_max_seq_len=None):
+        seqlen = override_max_seq_len or self.config['max_seq_len']
+        ret = [0]*seqlen
+        # first, second = (0, 1) if which_entity == 'e1' else (2, 3) if which_entity == 'e2' else (None,None)
+        first = record[f"{which_entity}_beg"]; second = record[f"{which_entity}_end"]
+        if second in [0, None]:
+            return ret
+        for i in range(first, second+1):
+            ret[i] = 1
+        return ret
+
     def _mangle_inputs(self, which, as_generator=False):
-        if self.mangled_pickles is not None:
-            p = pickle.load(open(os.path.join(self.mangled_pickles, f"{which}_RBert.p"), 'rb'))
-            return p
+        # if self.mangled_pickles is not None:
+        #     p = pickle.load(open(os.path.join(self.mangled_pickles, f"{which}_RBert.p"), 'rb'))
+        #     return p
+        print("Copying dataset...")
         dataset = copy.deepcopy(self.data_provider.get_dataset(which))
         too_long_sents = set()
+        print("Appending special tokens...")
         for sent_key in dataset.keys():
             dataset[sent_key]['tokens'].append('[SEP]')
             dataset[sent_key]['token_ids'].append(self.data_provider.tokenizer.special_token_ids['[SEP]'])
@@ -86,61 +94,77 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
                     too_long_sents.add(sent_key)
             if dataset[sent_key]['token_ids'][-1] != 0: # SEP falls outside the max_len boundary, so it has to be reinstated on the final position
                 dataset[sent_key]['token_ids'][-1] = self.data_provider.tokenizer.special_token_ids['[SEP]']
+        print("Removing longish sents...")
         for sent_key in too_long_sents: del(dataset[sent_key])
+        print("Extracting relation infos...")
         relation_infos = [dataset[sent_key]['relations'] for sent_key in dataset.keys()]
+        print("Padding...")
         padded_tokens = self._mangle_token_ids(dataset)
         token_types = tf.zeros(padded_tokens.shape, dtype=tf.int32)
-        attn_mask = tf.map_fn(fn=lambda row: tf.map_fn(fn=lambda tok_id: 0 if tok_id == 0 else 1, elems=row), elems=padded_tokens, dtype=tf.int32)
-        relation_classes = self._mangle_rels(dataset)
-        relation_classes_tensor = tf.constant([[d.get('e1_beg') or -1, d.get('e1_end') or -1, d.get('e2_beg') or -1, d.get('e2_end') or -1] for d in relation_infos])
-        relation_classes_mask = tf.map_fn(fn=lambda row: tf.zeros((4, 768), dtype=tf.int32) if all([pos==-1 for pos in row]) else tf.ones((4, 768), dtype=tf.int32), elems=relation_classes_tensor)
-        relation_classes_tensor = tf.map_fn(fn=lambda row: tf.zeros(4, dtype=tf.int32) if all([pos==-1 for pos in row]) else row, elems=relation_classes_tensor) 
+        print("Attention masks...")
+        #attn_mask = tf.map_fn(fn=lambda row: tf.map_fn(fn=lambda tok_id: 0 if tok_id == 0 else 1, elems=row), elems=padded_tokens, dtype=tf.int32) # FIXME: extremely slow
+        attn_mask = tf.cast(tf.cast(padded_tokens, dtype=tf.bool), dtype=tf.int32)
+        print("One-hot encoding relation classes...")
+        relation_classes_tensor = self._mangle_rels(dataset)
+        print("Masks for <e1>...")
+        e1_mask_tensor = tf.constant([self._get_entity_mask(sg_rel_info, 'e1') for sg_rel_info in relation_infos], dtype=tf.float32)
+        e1_mask_tensor = tf.expand_dims(e1_mask_tensor, axis=2) # to enable broadcasting, put the mask in the last axis so that it can propagate into the vector of 768 outputs on each timestep
+        print("Masks for <e2>...")
+        e2_mask_tensor = tf.constant([self._get_entity_mask(sg_rel_info, 'e2') for sg_rel_info in relation_infos], dtype=tf.float32)
+        e2_mask_tensor = tf.expand_dims(e2_mask_tensor, axis=2)
         return {
                 'input_ids': padded_tokens,
                 'token_type_ids': token_types,
                 'attention_mask': attn_mask,
-                'marker_positions': relation_classes_tensor,
-                'marker_positions_mask': relation_classes_mask
-                }, relation_classes, relation_infos
-
-        #model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer,
-        # input_attnmask_layer, input_entity_marker_positions,
-        # input_entity_marker_mask],
+                'e1_mask': e1_mask_tensor,
+                'e2_mask': e2_mask_tensor,
+                }, relation_classes_tensor, relation_infos
 
     def _build_model(self):
-        # moze sprobowac staly rozmiar batcha i tyle...
+        # TODO: 1) [?potrzebne?] Wylaczyc gradient przy zmiennych ng_
+        # 2) [OK] Pozbyc sie nanow przy dzieleniu przez zero -> ;TUTEJ
+        # 3) [OK] Detalicznie przesledzic czy tensory sa dobrze obliczane przy kazdym z krokow
+        # 4) [OK] Przerobic trening
+        # 5) Od-hardkodowac 768 poza tą funkcją
         input_ids_layer = Input(shape=(self.config['max_seq_len'],), name='input_ids', dtype=tf.int32)
         input_toktypeids_layer = Input(shape=(self.config['max_seq_len'],), name='token_type_ids', dtype=tf.int32)
         input_attnmask_layer = Input(shape=(self.config['max_seq_len'],), name='attention_mask', dtype=tf.int32)
-        input_entity_marker_positions = Input(shape=(4,), dtype=tf.int32, name='entity_markers')
-        input_entity_marker_mask = Input(shape=(4, 768,), dtype=tf.int32, name='entity_markers_mask')
+        input_e1_mask_layer = Input(shape=(self.config['max_seq_len'], 1, ), name='e1_mask', dtype=tf.float32)
+        input_e2_mask_layer = Input(shape=(self.config['max_seq_len'], 1, ), name='e2_mask', dtype=tf.float32)
+        bert_config = AutoConfig.from_pretrained(self.config['tokenizer']['pretrained'])
+        hidden_size = bert_config.hidden_size # 768 by default
 
         bert_layer = TFAutoModel.from_pretrained(self.config['tokenizer']['pretrained'])
+
         bert_layer.trainable = self.config['task_specific'].get('finetune_pretrained')
         bert_out_hidden = bert_layer({'input_ids': input_ids_layer, 'token_type_ids': input_toktypeids_layer,
                                       'attention_mask': input_attnmask_layer})[0] # only the hidden states
         
-        tylko_cztery = tf.gather(bert_out_hidden, input_entity_marker_positions, axis=1, batch_dims=1, name="all_ent_vecs")
-        maska_na_cztery = tf.math.multiply(tylko_cztery, tf.cast(input_entity_marker_mask, tf.float32), name="masked_all_ent_vecs")
+        ng_pierwsza = tf.math.multiply(bert_out_hidden, input_e1_mask_layer, name="e1_mask")
+        ng_druga    = tf.math.multiply(bert_out_hidden, input_e2_mask_layer, name="e2_mask")
+        ng_len_pierwsza = tf.reduce_sum(input_e1_mask_layer, axis=1, name="len_of_e1")
+        ng_len_druga    = tf.reduce_sum(input_e2_mask_layer, axis=1, name="len_of_e2")
         
-        H_ij_avg = tf.reduce_mean(maska_na_cztery[:, 0:2, :], axis=1, name="H_ij_avg")
-        H_km_avg = tf.reduce_mean(maska_na_cztery[:, 2:4, :], axis=1, name="H_km_avg")
-        dense_shared = tf.keras.layers.Dense(768, activation='relu')
+        H_ij_avg = tf.math.divide_no_nan(tf.reduce_sum(ng_pierwsza, axis=1), ng_len_pierwsza, name="e1_avg") # who would have thought TF has a special op for dealing with 0 / 0 nans...
+        H_km_avg = tf.math.divide_no_nan(tf.reduce_sum(ng_druga, axis=1), ng_len_druga, name="e2_avg")
+
+        cls = bert_out_hidden[:, 0, :]
+        dense_cls = tf.keras.layers.Dense(hidden_size, activation='tanh', name="dense_cls")(cls)
+        dense_cls_dropout = tf.keras.layers.Dropout(0.1)(dense_cls)
+
+        dense_shared = tf.keras.layers.Dense(hidden_size, activation='tanh', name="dense_e1_e2")
         H_ij_dense = dense_shared(H_ij_avg)
         H_ij_dense_dropout = tf.keras.layers.Dropout(0.1)(H_ij_dense)
         H_km_dense = dense_shared(H_km_avg)
         H_km_dense_dropout = tf.keras.layers.Dropout(0.1)(H_km_dense)
 
-        cls = bert_out_hidden[:, 0, :]
-        # polaczone = tf.concat([cls, H_ij_avg, H_km_avg], axis=1, name="concatenated")
-        polaczone = tf.concat([cls, H_ij_dense_dropout, H_km_dense_dropout], axis=1, name="concatenated")
-        przedostatnia = tf.keras.layers.Dense(3*len(self.data_provider.get_relations_labels()), activation='relu')(polaczone)
-        ostatnia = tf.keras.layers.Dense(len(self.data_provider.get_relations_labels()), activation='softmax')(przedostatnia)
+        polaczone = tf.concat([dense_cls_dropout, H_ij_dense_dropout, H_km_dense_dropout], axis=1, name="concatenated")
+        # przedostatnia = tf.keras.layers.Dense(3*len(self.data_provider.get_relations_labels()), activation='relu')(polaczone)
+        # ostatnia = tf.keras.layers.Dense(len(self.data_provider.get_relations_labels()), activation='softmax')(przedostatnia)
+        ostatnia = tf.keras.layers.Dense(len(self.data_provider.get_relations_labels()), activation='softmax', name='final_classif')(polaczone)
         
-        # model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer], outputs=bert_out_hidden)
-        model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer, input_entity_marker_positions, input_entity_marker_mask],
+        model = tf.keras.Model(inputs=[input_ids_layer, input_toktypeids_layer, input_attnmask_layer, input_e1_mask_layer, input_e2_mask_layer],
                                outputs=[ostatnia])
-
         model.summary()
         return model
 
@@ -148,11 +172,11 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
         x_train, y_train, _ = self._mangle_inputs('trainset')
         x_valid, y_valid, _ = self._mangle_inputs('validset')
         x_train_bundle = [x_train['input_ids'], x_train['token_type_ids'],
-                          x_train['attention_mask'], x_train['marker_positions'],
-                          x_train['marker_positions_mask']]
+                          x_train['attention_mask'], x_train['e1_mask'],
+                          x_train['e2_mask']]
         x_valid_bundle = [x_valid['input_ids'], x_valid['token_type_ids'],
-                          x_valid['attention_mask'], x_valid['marker_positions'],
-                          x_valid['marker_positions_mask']]
+                          x_valid['attention_mask'], x_valid['e1_mask'],
+                          x_valid['e2_mask']]
         self.model = self.model or self._build_model()
         opt = tf.keras.optimizers.Adam(learning_rate=0.0005)
         self.model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
@@ -162,8 +186,8 @@ class RelacjoSzukaczBERT(EncjoSzukaczLSTM):
 
     def prepare_pred_input(self, mangled_dataset, from_idx, to_idx):
         x_pred_bundle = [mangled_dataset['input_ids'][from_idx:to_idx], mangled_dataset['token_type_ids'][from_idx:to_idx],
-                         mangled_dataset['attention_mask'][from_idx:to_idx], mangled_dataset['marker_positions'][from_idx:to_idx],
-                         mangled_dataset['marker_positions_mask'][from_idx:to_idx]]
+                         mangled_dataset['attention_mask'][from_idx:to_idx], mangled_dataset['e1_mask'][from_idx:to_idx],
+                         mangled_dataset['e2_mask'][from_idx:to_idx]]
         ret = self.model.predict(x_pred_bundle)
         return ret
 

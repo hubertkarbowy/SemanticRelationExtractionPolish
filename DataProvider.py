@@ -325,11 +325,12 @@ class KBP37DataProvider(DataProviderInterface):
     def get_entity_labels(self):
         """ Entity types cannot be assigned reliably, so skipping them """
         if self.config['tokenizer'].get('entity_encoding') == 'iob':
-            ent_labels = {0: 'O', 1: 'B-ENT', 2: 'I-ENT'}
+            ent_labels = {'O': 0, 'B-ENT': 1, 'I-ENT': 2}
         elif self.config['tokenizer'].get('entity_encoding') is None:
-            ent_labels = {0: 'O', 1: 'ENT'}
+            ent_labels = {'O': 0, 'ENT': 1}
         else:
             raise ValueError(f"Unknown entity encoding scheme {self.config['tokenizer'].get('entity_encoding')}")
+        return ent_labels
 
     def get_relations_labels(self):
         """ This is fixed, so no need to scan the corpus """

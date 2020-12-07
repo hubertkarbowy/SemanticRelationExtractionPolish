@@ -709,8 +709,8 @@ def tokenize_from_kbp37(*, doc_id, doc_text, tokenizer_obj, lang='english',
 
     tokens = []; token_ids = []; entities = []; entity_ids = []; annotated_relations = []
     i=0; j=0; curr_tokens = []; curr_token_ids = []; curr_entities = []; curr_entity_ids = []
-    curr_relations = {'begin_e1': None, 'end_e1': None, 'entity_class_e1': 'ENT',
-                      'begin_e2': None, 'end_e2': None, 'entity_class_e2': 'ENT',
+    curr_relations = {'e1_beg': None, 'e1_end': None, 'entity_class_e1': 'ENT',
+                      'e2_beg': None, 'e2_end': None, 'entity_class_e2': 'ENT',
                       'relation_class': None, 'is_reversed': 'UNSUP'}
     curr_relations['relation_class'] = kbp37_describe_relation(raw_relations, ignore_directionality=ignore_directionality)
     sent = doc_text
@@ -768,8 +768,8 @@ def tokenize_from_kbp37(*, doc_id, doc_text, tokenizer_obj, lang='english',
                 temp_entity_ids[0] = 1
             else:
                 raise ValueError(f"Unsupported entity encoding scheme {entity_encoding_scheme}")
-        curr_relations[f'begin_{pure_marker}'] = len(curr_entities) # modify this before extension
-        curr_relations[f'end_{pure_marker}'] = len(curr_entities) + len(temp_entities) - 1
+        curr_relations[f'{pure_marker}_beg'] = len(curr_entities) # modify this before extension
+        curr_relations[f'{pure_marker}_end'] = len(curr_entities) + len(temp_entities) - 1
         curr_tokens.extend(temp_tokens)
         curr_token_ids.extend(temp_token_ids)
         curr_entities.extend(temp_entities)
